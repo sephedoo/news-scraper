@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # Main News Scraper Script
-# Uses the universal scraper with configurable selectors
+# Uses the universal scraper with modular site configurations
 
 import argparse
 import sys
-from news_scraper_configs import SITE_CONFIGURATIONS, get_config_with_processors
+from site_configs import SITE_CONFIGURATIONS, get_site_config, list_available_sites
 from universal_news_scraper import UniversalNewsScraper
 
 def main():
@@ -18,28 +18,52 @@ def main():
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
     parser.add_argument('--combine', action='store_true', help='Combine results from all sites')
     parser.add_argument('--max-articles', type=int, help='Maximum articles per site')
+    parser.add_argument('--validate', action='store_true', help='Validate site configurations')
+    parser.add_argument('--create-config', nargs=3, metavar=('SITE_KEY', 'SITE_NAME', 'SITE_URL'),
+                       help='Create a new site configuration')
     
     args = parser.parse_args()
+    
+    # Create new configuration if requested
+    if args.create_config:
+        site_key, site_name, site_url = args.create_config
+        from site_configs.config_manager import create_new_site_config
+        create_new_site_config(site_key, site_name, site_url)
+        return
     
     # List available sites if requested
     if args.list:
         print("Available news sites:")
-        for site_key, config in SITE_CONFIGURATIONS.items():
-            print(f"  {site_key}: {config['name']}")
+        sites = list_available_sites()
+        for site_key in sorted(sites):
+            config = get_site_config(site_key)
+            if config:
+                print(f"  {site_key}: {config.get('name', site_key)}")
+        return
+    
+    # Validate configurations if requested
+    if args.validate:
+        from site_configs.config_manager import config_manager
+        print("Validating site configurations...")
+        for site_key in list_available_sites():
+            is_valid, message = config_manager.validate_config(site_key)
+            status = "✓" if is_valid else "✗"
+            print(f"{status} {site_key}: {message}")
         return
     
     # Determine which sites to scrape
     sites_to_scrape = []
     
     if args.all:
-        sites_to_scrape = list(SITE_CONFIGURATIONS.keys())
+        sites_to_scrape = list_available_sites()
     elif args.sites:
         # Validate requested sites
         for site in args.sites:
-            if site.lower() in SITE_CONFIGURATIONS:
+            if site.lower() in list_available_sites():
                 sites_to_scrape.append(site.lower())
             else:
                 print(f"Warning: Site '{site}' not found in configurations")
+                print(f"Available sites: {', '.join(sorted(list_available_sites()))}")
     else:
         # Default to BBC if no sites specified
         sites_to_scrape = ['bbc']
@@ -56,11 +80,9 @@ def main():
     for site_key in sites_to_scrape:
         try:
             print(f"\n{'=' * 50}")
-            print(f"Scraping {SITE_CONFIGURATIONS[site_key]['name']}")
+            config = get_site_config(site_key)
+            print(f"Scraping {config.get('name', site_key)}")
             print('=' * 50)
-            
-            # Get configuration with custom processors
-            config = get_config_with_processors(site_key)
             
             # Create scraper instance
             scraper = UniversalNewsScraper(config, verbose=args.verbose)
@@ -75,7 +97,7 @@ def main():
                     print(f"Limited to {args.max_articles} articles")
             
             if articles:
-                print(f"Found {len(articles)} articles from {config['name']}")
+                print(f"Found {len(articles)} articles from {config.get('name', site_key)}")
                 
                 # Save individual site results
                 if not args.combine:
@@ -93,8 +115,14 @@ def main():
                     print("\nSample articles:")
                     for i, article in enumerate(articles[:3]):
                         print(f"  {i+1}. {article['title'][:60]}...")
+                        
+                    # Show configuration being used
+                    print(f"\nConfiguration summary:")
+                    print(f"  URL: {config['url']}")
+                    print(f"  Container: {config['article_container']}")
+                    print(f"  Custom processors: {'Yes' if config.get('date_parser') or config.get('post_process') else 'No'}")
             else:
-                print(f"No articles found from {config['name']}")
+                print(f"No articles found from {config.get('name', site_key)}")
         
         except Exception as e:
             print(f"Error scraping {site_key}: {str(e)}")
